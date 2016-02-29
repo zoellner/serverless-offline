@@ -69,12 +69,12 @@ module.exports = function(ServerlessPlugin, serverlessPath) {
       this.port = this.evt.port || 3000;
       
       if(this.evt.protocol && this.evt.protocol.length > 0){
-
+        
         var tls = {
           key: fs.readFileSync(path.join(__dirname,this.evt.protocol, 'key.pem'), 'ascii'),
           cert: fs.readFileSync(path.join(__dirname,this.evt.protocol, 'cert.pem'), 'ascii')
         };
-
+        
         this.server.connection({ 
           port: this.port,
           tls: tls 
