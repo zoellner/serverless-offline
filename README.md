@@ -20,7 +20,7 @@ Check it out on the [v1.0.0 branch](https://github.com/dherault/serverless-offli
 Requires Node v4 and over and Serverless v0.4.x. In your Serverless project:
 
 ```
-npm install serverless-offline
+npm install serverless-offline@0.2.6
 ```
 
 Then in `s-project.json` add following entry to the plugins array: `serverless-offline`
