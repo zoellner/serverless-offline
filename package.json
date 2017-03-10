@@ -74,7 +74,10 @@
     "url": "https://github.com/dherault/serverless-offline/issues"
   },
   "homepage": "https://github.com/dherault/serverless-offline",
-  "dependencies": {},
+  "dependencies": {
+    "hapi": "14.2.0",
+    "hapi-cors-headers": "^1.0.0"
+  },
   "devDependencies": {
     "babel-cli": "^6.23.0",
     "babel-preset-env": "^1.2.1",
