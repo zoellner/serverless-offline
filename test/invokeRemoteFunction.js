@@ -1,4 +1,4 @@
-import request from 'request';
+const request = require('request');
 
 // Please act responsibly. Thanks.
 const remoteUrl = 'https://cb2yhbkxid.execute-api.us-east-1.amazonaws.com/dev/';
@@ -16,4 +16,4 @@ function invokeRemoteFunction({ name, method, headers, body }) {
   });
 }
 
-export default invokeRemoteFunction;
+module.exports = invokeRemoteFunction;
