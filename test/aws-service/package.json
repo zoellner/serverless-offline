@@ -8,6 +8,7 @@
   "dependencies": {},
   "devDependencies": {},
   "scripts": {
-    "start": "sls offline-tester"
+    "start": "sls offline",
+    "test": "sls offline-tester"
   }
 }

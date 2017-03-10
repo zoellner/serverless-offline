@@ -10,7 +10,7 @@ const defaultOptions = {
   host: 'localhost',
   port: 3000,
   prefix: '/',
-  // location: '.',
+  location: '.',
   // noTimeout: this.options.noTimeout || false,
   // noEnvironment: this.options.noEnvironment || false,
   // dontPrintOutput: this.options.dontPrintOutput || false,
@@ -30,7 +30,7 @@ class ServerlessOffline {
     this.commands = {
       offline: {
         usage: 'Simulates API Gateway to call your lambda functions locally.',
-        lifecycleEvents: ['start', 'end'],
+        lifecycleEvents: ['start', 'wait-or-execute-script', 'end'],
         options: {
           host: {
             usage: 'Host name to listen on. Default: localhost',
@@ -48,13 +48,13 @@ class ServerlessOffline {
           //   usage: 'Tells the plugin to skip require cache invalidation. A script reloading tool like Nodemon might then be needed',
           //   shortcut: 'c',
           // },
+          location: {
+            usage: 'The root location of the handlers\' files.',
+            shortcut: 'l',
+          },
           httpsDir: {
             usage: 'To enable HTTPS, specify directory (relative to your cwd, typically your project dir) for both cert.pem and key.pem files.',
           },
-          // location: {
-          //   usage: 'The root location of the handlers\' files.',
-          //   shortcut: 'l',
-          // },
           // noTimeout: {
           //   usage: 'Disable the timeout feature.',
           //   shortcut: 't',
@@ -86,6 +86,7 @@ class ServerlessOffline {
 
     this.hooks = {
       'offline:start': this.start.bind(this),
+      'offline:wait-or-execute-script': this.waitOrExecuteScript.bind(this),
       'offline:end': this.end.bind(this),
     };
 
@@ -103,21 +104,15 @@ class ServerlessOffline {
     // Some users would like to know their environment outside of the handler
     process.env.IS_OFFLINE = true;
 
-    return new Promise((resolve, reject) => {
-      this.server.start(err => {
-        if (err) return reject(err);
-
-        this.log(`Offline listening on http${this.options.httpsProtocol ? 's' : ''}://${this.options.host}:${this.options.port}`);
-
-        resolve();
-      });
-    })
-    .then(() => this.options.exec ? this.executeShellScript() : this.listenForSigInt());
+    return this.server.start()
+    .then(() => {
+      this.log(`Offline listening on http${this.params.httpsDir ? 's' : ''}://${this.params.host}:${this.params.port}`);
+    });
   }
 
   // Checks wether the user is using a compatible serverless version or not
   checkVersionAndRuntime() {
-    const { version, provider: { runtime } } = this.serverless;
+    const { version, service: { provider: { runtime } } } = this.serverless;
 
     if (!version.startsWith('1.')) {
       this.log(`Offline requires Serverless v1.x.x but found ${version}. Exiting.`);
@@ -153,7 +148,7 @@ class ServerlessOffline {
     const connectionOptions = { host, port };
 
     // HTTPS support
-    if (typeof httpsDir === 'string') {
+    if (httpsDir) {
       connectionOptions.tls = {
         key: fs.readFileSync(path.resolve(httpsDir, 'key.pem'), 'ascii'),
         cert: fs.readFileSync(path.resolve(httpsDir, 'cert.pem'), 'ascii'),
@@ -167,40 +162,47 @@ class ServerlessOffline {
   }
 
   createRoutes() {
-    Object.keys(this.serverless.service.functions)
-    .forEach(id => {
-      const lambdaFunctionData = this.serverless.service.getFunction(id);
+    const servicePath = path.join(this.serverless.config.servicePath, this.params.location);
 
-      lambdaFunctionData.id = id;
+    Object.keys(this.serverless.service.functions).forEach(id => {
 
-      this.createRoute(lambdaFunctionData);
-    });
-  }
+      const functionDefinition = this.serverless.service.getFunction(id);
 
-  // Listen for ctrl+c to stop the server
-  listenForSigInt() {
-    return new Promise(resolve => {
-      process.on('SIGINT', () => {
-        this.log('Offline Halting...');
-        resolve();
+      this.log(`Routes for ${id}:`);
+
+      // Adds a route for each HTTP endpoint
+      functionDefinition.events.forEach(eventDefinition => {
+
+        if (!eventDefinition.http) return;
+
+        // Handle one-liner setups like - http: GET users/index
+        if (typeof eventDefinition.http === 'string') {
+          const [method, path] = eventDefinition.http.split(' ');
+
+          eventDefinition.http = { method, path };
+        }
+
+        console.log(eventDefinition);
+
       });
     });
   }
 
   // Some user would like to execute some script
   executeShellScript() {
-    const command = this.options.exec;
+    const command = this.params.exec;
 
     this.log(`Offline executing script [${command}]`);
 
     return new Promise(resolve => {
       cp.exec(command, (error, stdout, stderr) => {
-        this.log(`exec stdout: [${stdout}]`);
-        this.log(`exec stderr: [${stderr}]`);
+        if (stderr) this.log(stderr);
+        if (stdout) this.log(stdout);
 
         if (error) {
           // Use the failed command's exit code, proceed as normal so that shutdown can occur gracefully
-          this.log(`Offline error executing script [${error}]`);
+          this.log(`Error while executing script [${command}]`);
+          this.log(error);
           this.exitCode = error.code || 1;
         }
 
@@ -209,11 +211,40 @@ class ServerlessOffline {
     });
   }
 
+  // When the server is up, we either execute some user-defined script
+  // (ex: for testing) or we wait for SIGINT (ctrl + c) before
+  // proceeding to the next step (killing the server)
+  waitOrExecuteScript() {
+    return new Promise(resolve => {
+      const command = this.params.exec;
 
-  end(exitCode = 0) {
-    this.log('Halting offline server');
-    this.server.stop({ timeout: 5000 })
-    .then(() => process.exit(exitCode));
+      if (command) {
+        this.log(`Executing "${command}"`);
+
+        cp.exec(command, (error, stdout, stderr) => {
+          if (stderr) console.log(stderr);
+          if (stdout) console.log(stdout);
+
+          if (error) {
+            // Use the failed command's exit code, proceed as normal so that shutdown can occur gracefully
+            this.log(`Error while executing "${command}"`);
+            console.log(error);
+            this.exitCode = error.code || 1;
+          }
+
+          resolve();
+        });
+      }
+
+      process.on('SIGINT', resolve);
+    });
+  }
+
+  end() {
+    this.log('Halting server...');
+
+    return this.server.stop()
+    .then(() => process.exit(this.exitCode));
   }
 }
 
