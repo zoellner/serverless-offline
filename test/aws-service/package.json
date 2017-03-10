@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "description": "A test service",
   "main": "handler.js",
-  "author": "The Serverless-Offline contributors",
+  "author": "The serverless-offline contributors",
   "license": "MIT",
   "dependencies": {},
   "devDependencies": {},

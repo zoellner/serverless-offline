@@ -11,10 +11,13 @@ const defaultOptions = {
   port: 3000,
   prefix: '/',
   location: '.',
+  corsAllowOrigin: '*',
+  corsAllowHeaders: 'accept,content-type,x-api-key',
+  corsDisallowCredentials: false,
   // noTimeout: this.options.noTimeout || false,
   // noEnvironment: this.options.noEnvironment || false,
   // dontPrintOutput: this.options.dontPrintOutput || false,
-  // skipCacheInvalidation: this.options.skipCacheInvalidation || false,
+  skipCacheInvalidation: false,
   // corsAllowOrigin: this.options.corsAllowOrigin || '*',
   // corsAllowHeaders: this.options.corsAllowHeaders || 'accept,content-type,x-api-key',
   // corsAllowCredentials: true,
@@ -26,6 +29,7 @@ class ServerlessOffline {
   constructor(serverless, options) {
     this.serverless = serverless;
     this.options = options || {};
+    this.requests = {};
 
     this.commands = {
       offline: {
@@ -65,15 +69,15 @@ class ServerlessOffline {
           // dontPrintOutput: {
           //   usage: 'Turns of logging of your lambda outputs in the terminal.',
           // },
-          // corsAllowOrigin: {
-          //   usage: 'Used to build the Access-Control-Allow-Origin header for CORS support.',
-          // },
-          // corsAllowHeaders: {
-          //   usage: 'Used to build the Access-Control-Allow-Headers header for CORS support.',
-          // },
-          // corsDisallowCredentials: {
-          //   usage: 'Used to override the Access-Control-Allow-Credentials default (which is true) to false.',
-          // },
+          corsAllowOrigin: {
+            usage: 'Allows to specify the Access-Control-Allow-Origin header for CORS support. Default: "*"',
+          },
+          corsAllowHeaders: {
+            usage: 'Allows to specify the Access-Control-Allow-Headers header for CORS support. Default: "accept,content-type,x-api-key"',
+          },
+          corsDisallowCredentials: {
+            usage: 'Used to override the Access-Control-Allow-Credentials default (which is true) to false.',
+          },
           // apiKey: {
           //   usage: 'Defines the api key value to be used for endpoints marked as private. Defaults to a random hash.',
           // },
@@ -94,12 +98,17 @@ class ServerlessOffline {
     this.log = console.log; // TODO
   }
 
+  /* ------------------
+    Life cycle events
+  ------------------ */
+
   // First lifecycleEvent, launches the main logic
   start() {
     this.checkVersionAndRuntime();
     this.createParams();
     this.createServer();
     this.createRoutes();
+    this.create404Route();
 
     // Some users would like to know their environment outside of the handler
     process.env.IS_OFFLINE = true;
@@ -107,107 +116,6 @@ class ServerlessOffline {
     return this.server.start()
     .then(() => {
       this.log(`Offline listening on http${this.params.httpsDir ? 's' : ''}://${this.params.host}:${this.params.port}`);
-    });
-  }
-
-  // Checks wether the user is using a compatible serverless version or not
-  checkVersionAndRuntime() {
-    const { version, service: { provider: { runtime } } } = this.serverless;
-
-    if (!version.startsWith('1.')) {
-      this.log(`Offline requires Serverless v1.x.x but found ${version}. Exiting.`);
-      process.exit(0);
-    }
-
-    if (!supportedRuntimes.includes(runtime)) {
-      this.log(`Offline only supports the following runtimes: ${supportedRuntimes}. Found ${runtime} runtime. Exiting.`);
-      process.exit(0);
-    }
-  }
-
-  createParams() {
-    console.log('this.options:', this.options);
-    this.params = Object.assign(defaultOptions, this.options);
-
-    // Prefix must start and end with '/'
-    if (!this.params.prefix.startsWith('/')) this.params.prefix = `/${this.params.prefix}`;
-    if (!this.params.prefix.endsWith('/')) this.params.prefix += '/';
-  }
-
-  createServer() {
-    // Hapijs server creation
-    this.server = new Hapi.Server({
-      connections: {
-        router: {
-          stripTrailingSlash: true, // removes trailing slashes on incoming paths.
-        },
-      },
-    });
-
-    const { host, port, httpsDir } = this.params;
-    const connectionOptions = { host, port };
-
-    // HTTPS support
-    if (httpsDir) {
-      connectionOptions.tls = {
-        key: fs.readFileSync(path.resolve(httpsDir, 'key.pem'), 'ascii'),
-        cert: fs.readFileSync(path.resolve(httpsDir, 'cert.pem'), 'ascii'),
-      };
-    }
-
-    this.server.connection(connectionOptions);
-
-    // Enable CORS preflight response
-    this.server.ext('onPreResponse', hapiCorsHeaders);
-  }
-
-  createRoutes() {
-    const servicePath = path.join(this.serverless.config.servicePath, this.params.location);
-
-    Object.keys(this.serverless.service.functions).forEach(id => {
-
-      const functionDefinition = this.serverless.service.getFunction(id);
-
-      this.log(`Routes for ${id}:`);
-
-      // Adds a route for each HTTP endpoint
-      functionDefinition.events.forEach(eventDefinition => {
-
-        if (!eventDefinition.http) return;
-
-        // Handle one-liner setups like - http: GET users/index
-        if (typeof eventDefinition.http === 'string') {
-          const [method, path] = eventDefinition.http.split(' ');
-
-          eventDefinition.http = { method, path };
-        }
-
-        console.log(eventDefinition);
-
-      });
-    });
-  }
-
-  // Some user would like to execute some script
-  executeShellScript() {
-    const command = this.params.exec;
-
-    this.log(`Offline executing script [${command}]`);
-
-    return new Promise(resolve => {
-      cp.exec(command, (error, stdout, stderr) => {
-        if (stderr) this.log(stderr);
-        if (stdout) this.log(stdout);
-
-        if (error) {
-          // Use the failed command's exit code, proceed as normal so that shutdown can occur gracefully
-          this.log(`Error while executing script [${command}]`);
-          this.log(error);
-          this.exitCode = error.code || 1;
-        }
-
-        resolve();
-      });
     });
   }
 
@@ -240,12 +148,231 @@ class ServerlessOffline {
     });
   }
 
+  // Last lifecycleEvent, we kill the server and exit the process
   end() {
     this.log('Halting server...');
 
     return this.server.stop()
     .then(() => process.exit(this.exitCode));
   }
+
+  /* -----
+    Main
+  ----- */
+
+  // Checks wether the user is using a compatible serverless version or not
+  checkVersionAndRuntime() {
+    const { version, service: { provider: { runtime } } } = this.serverless;
+
+    if (!version.startsWith('1.')) {
+      this.log(`Offline requires Serverless v1.x.x but found ${version}. Exiting.`);
+      process.exit(0);
+    }
+
+    if (!supportedRuntimes.includes(runtime)) {
+      this.log(`Offline only supports the following runtimes: ${supportedRuntimes}. Found ${runtime} runtime. Exiting.`);
+      process.exit(0);
+    }
+  }
+
+  createParams() {
+    this.params = Object.assign(defaultOptions, this.options);
+
+    // Prefix must start and end with '/'
+    if (!this.params.prefix.startsWith('/')) this.params.prefix = `/${this.params.prefix}`;
+    if (!this.params.prefix.endsWith('/')) this.params.prefix += '/';
+
+    // Parse CORS options
+    this.params.cors = {
+      origin: this.params.corsAllowOrigin.replace(/\s/g, '').split(','),
+      headers: this.params.corsAllowHeaders.replace(/\s/g, '').split(','),
+      credentials: !this.params.corsDisallowCredentials,
+    };
+
+    // Locate service directory
+    this.params.servicePath = path.join(this.serverless.config.servicePath, this.params.location);
+  }
+
+  createServer() {
+    // Hapijs server creation
+    this.server = new Hapi.Server({
+      connections: {
+        router: {
+          stripTrailingSlash: true, // removes trailing slashes on incoming paths.
+        },
+      },
+    });
+
+    const { host, port, httpsDir } = this.params;
+    const connectionOptions = { host, port };
+
+    // HTTPS support
+    if (httpsDir) {
+      connectionOptions.tls = {
+        key: fs.readFileSync(path.resolve(httpsDir, 'key.pem'), 'ascii'),
+        cert: fs.readFileSync(path.resolve(httpsDir, 'cert.pem'), 'ascii'),
+      };
+    }
+
+    this.server.connection(connectionOptions);
+
+    // Enable CORS preflight response
+    this.server.ext('onPreResponse', hapiCorsHeaders);
+  }
+
+  createRoutes() {
+    Object.keys(this.serverless.service.functions).forEach(id => {
+
+      const functionDefinition = this.serverless.service.getFunction(id);
+
+      this.log();
+      this.log(`Routes for ${id}:`);
+
+      // Adds a route for each HTTP endpoint
+      functionDefinition.events.forEach(eventDefinition => {
+
+        const endpointDefinition = eventDefinition.http;
+
+        if (!endpointDefinition) return;
+
+        let path, method, integration;
+
+        // Handle one-liner setups like - http: GET users/index
+        if (typeof endpointDefinition === 'string') [method, path] = endpointDefinition.split(' ');
+        else ({ method, path, integration } = endpointDefinition);
+
+        method = method.toUpperCase();
+
+        // Prefix must start and end with '/' but path must not end with '/'
+        path = this.params.prefix + (path.startsWith('/') ? path.slice(1) : path);
+        if (path !== '/' && path.endsWith('/')) path = path.slice(0, -1);
+
+        this.log(`- ${method} ${path}`);
+
+        // We make more transformation after logging meaningful info
+        path = path.replace(/\+}/g, '*}');
+        if (method === 'ANY') method = '*';
+        integration = integration || 'lambda-proxy';
+
+        if (endpointDefinition.authorizer) {
+          // TODO
+        }
+
+        const cors = endpointDefinition.cors ?
+          Object.assign(this.params.cors, endpointDefinition.cors) :
+          null;
+
+        // Route creation
+        this.server.route({
+          method,
+          path,
+          config: {
+            cors,
+          },
+          handler: this.createRouteHandler(integration),
+        });
+      });
+    });
+  }
+
+  createRouteHandler(integration) {
+
+    return (request, reply) => {
+      // Shared mutable state is the root of all evil they say
+      const requestId = Math.random().toString().slice(2);
+      this.requests[requestId] = { done: false };
+      this.currentRequestId = requestId;
+
+      // Holds the response to do async op
+      const response = reply.response().hold();
+      const contentType = request.mime || 'application/json';
+
+      // Some content-type require payload parsing
+      if (['application/json', 'application/vnd.api+json'].includes(contentType)) {
+        try {
+          request.payload = JSON.parse(request.payload);
+        }
+        catch (err) {
+          this.log('error in converting request.payload to JSON:', err);
+        }
+      }
+
+      /* HANDLER LAZY LOADING */
+
+      let handler; // The lambda function
+
+      try {
+        handler = functionHelper.createHandler(funOptions, this.options);
+      }
+      catch (err) {
+        return this._reply500(response, `Error while loading ${funName}`, err, requestId);
+      }
+
+      if (!this.params.skipCacheInvalidation) {
+        debugLog('Invalidating cache...');
+
+        for (const key in require.cache) {
+          // Require cache invalidation, brutal and fragile.
+          // Might cause errors, if so please submit an issue.
+          if (!key.match('node_modules')) delete require.cache[key];
+        }
+      }
+
+      debugLog(`Loading handler... (${funOptions.handlerPath})`);
+      const handler = require(funOptions.handlerPath)[funOptions.handlerName];
+
+      if (typeof handler !== 'function') {
+        throw new Error(`Serverless-offline: handler for '${funOptions.funName}' is not a function`);
+      }
+    };
+  }
+
+  create404Route() {
+    // If a {proxy+} route exists, don't conflict with it
+    if (this.server.match('*', '/{p*}')) return;
+
+    this.server.route({
+      method: '*',
+      path: '/{p*}',
+      config: { cors: this.para.corsConfig },
+      handler: (request, reply) => {
+        const response = reply({
+          statusCode: 404,
+          error: 'Serverless-offline: route not found.',
+          currentRoute: `${request.method} - ${request.path}`,
+          existingRoutes: this.server.table()[0].table
+            .filter(route => route.path !== '/{p*}') // Exclude this (404) route
+            .sort((a, b) => a.path <= b.path ? -1 : 1) // Sort by path
+            .map(route => `${route.method} - ${route.path}`), // Human-friendly result
+        });
+        response.statusCode = 404;
+      },
+    });
+  }
+
+  // Some user would like to execute some script
+  executeShellScript() {
+    const command = this.params.exec;
+
+    this.log(`Offline executing script [${command}]`);
+
+    return new Promise(resolve => {
+      cp.exec(command, (error, stdout, stderr) => {
+        if (stderr) this.log(stderr);
+        if (stdout) this.log(stdout);
+
+        if (error) {
+          // Use the failed command's exit code, proceed as normal so that shutdown can occur gracefully
+          this.log(`Error while executing script [${command}]`);
+          this.log(error);
+          this.exitCode = error.code || 1;
+        }
+
+        resolve();
+      });
+    });
+  }
+
 }
 
 module.exports = ServerlessOffline;
