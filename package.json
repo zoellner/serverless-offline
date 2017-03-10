@@ -74,24 +74,15 @@
     "url": "https://github.com/dherault/serverless-offline/issues"
   },
   "homepage": "https://github.com/dherault/serverless-offline",
-  "dependencies": {
-    "babel-register": "^6.18.0",
-    "boom": "^4.2.0",
-    "crypto": "^0.0.3",
-    "hapi": "14.2.0",
-    "hapi-cors-headers": "^1.0.0",
-    "js-string-escape": "^1.0.1",
-    "jsonpath-plus": "^0.16.0",
-    "lodash": "^4.17.4",
-    "velocityjs": "^0.9.3"
-  },
+  "dependencies": {},
   "devDependencies": {
+    "babel-cli": "^6.23.0",
+    "babel-preset-env": "^1.2.1",
     "chai": "^3.5.0",
-    "dirty-chai": "^1.2.2",
     "eslint": "^3.16.1",
     "eslint-config-nelson": "^0.2.0",
     "eslint-plugin-import": "^2.2.0",
     "mocha": "^3.2.0",
-    "sinon": "^1.17.7"
+    "request": "^2.81.0"
   }
 }
