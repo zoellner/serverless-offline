@@ -33,7 +33,7 @@ module.exports.basicLambda500 = (event, context, cb) => {
   cb(new Error('[500] Fake internal server error. lambda-proxy integration'));
 };
 
-module.exports.getOnlyLamdaProxy = (event, context, callback) => {
+module.exports.getLamdaProxy = (event, context, callback) => {
   const response = {
     statusCode: 200,
     body: JSON.stringify({
@@ -45,11 +45,36 @@ module.exports.getOnlyLamdaProxy = (event, context, callback) => {
   callback(null, response);
 };
 
-module.exports.postOnlyLamdaProxy = (event, context, callback) => {
+module.exports.postLamdaProxy = (event, context, callback) => {
   const response = {
     statusCode: 200,
     body: JSON.stringify({
       message: 'Serverless-offline FTW! post-only lambda-proxy integration',
+      input: event,
+    }),
+  };
+
+  callback(null, response);
+};
+
+module.exports.getAndPostLamdaProxy = (event, context, callback) => {
+  const response = {
+    statusCode: 200,
+    body: JSON.stringify({
+      message: 'Serverless-offline FTW! get and post-only lambda-proxy integration',
+      input: event,
+    }),
+  };
+
+  callback(null, response);
+};
+
+module.exports.environmentLambdaProxy = (event, context, callback) => {
+  const response = {
+    statusCode: 200,
+    body: JSON.stringify({
+      message: 'Serverless-offline FTW! environment lambda-proxy integration',
+      environment: process.env,
       input: event,
     }),
   };

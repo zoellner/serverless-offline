@@ -5,25 +5,6 @@ const path = require('path');
 const Hapi = require('hapi');
 const hapiCorsHeaders = require('hapi-cors-headers');
 
-const supportedRuntimes = ['nodejs', 'nodejs4.3'];
-const defaultOptions = {
-  host: 'localhost',
-  port: 3000,
-  prefix: '/',
-  location: '.',
-  corsAllowOrigin: '*',
-  corsAllowHeaders: 'accept,content-type,x-api-key',
-  corsDisallowCredentials: false,
-  // noTimeout: this.options.noTimeout || false,
-  // noEnvironment: this.options.noEnvironment || false,
-  // dontPrintOutput: this.options.dontPrintOutput || false,
-  skipCacheInvalidation: false,
-  // corsAllowOrigin: this.options.corsAllowOrigin || '*',
-  // corsAllowHeaders: this.options.corsAllowHeaders || 'accept,content-type,x-api-key',
-  // corsAllowCredentials: true,
-  // apiKey: this.options.apiKey || crypto.createHash('md5').digest('hex'),
-};
-
 class ServerlessOffline {
 
   constructor(serverless, options) {
@@ -69,13 +50,13 @@ class ServerlessOffline {
           // dontPrintOutput: {
           //   usage: 'Turns of logging of your lambda outputs in the terminal.',
           // },
-          corsAllowOrigin: {
+          corsOrigin: {
             usage: 'Allows to specify the Access-Control-Allow-Origin header for CORS support. Default: "*"',
           },
-          corsAllowHeaders: {
+          corsHeaders: {
             usage: 'Allows to specify the Access-Control-Allow-Headers header for CORS support. Default: "accept,content-type,x-api-key"',
           },
-          corsDisallowCredentials: {
+          noCorsCredentials: {
             usage: 'Used to override the Access-Control-Allow-Credentials default (which is true) to false.',
           },
           // apiKey: {
@@ -162,6 +143,7 @@ class ServerlessOffline {
 
   // Checks wether the user is using a compatible serverless version or not
   checkVersionAndRuntime() {
+    const supportedRuntimes = ['nodejs', 'nodejs4.3'];
     const { version, service: { provider: { runtime } } } = this.serverless;
 
     if (!version.startsWith('1.')) {
@@ -176,21 +158,41 @@ class ServerlessOffline {
   }
 
   createParams() {
-    this.params = Object.assign(defaultOptions, this.options);
+    this.params = Object.assign({
+      host: 'localhost',
+      port: 3000,
+      prefix: '/',
+      location: '.',
+      corsOrigin: '*',
+      corsHeaders: 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
+      noCorsCredentials: false,
+      // noTimeout: this.options.noTimeout || false,
+      // noEnvironment: this.options.noEnvironment || false,
+      // dontPrintOutput: this.options.dontPrintOutput || false,
+      skipCacheInvalidation: false,
+      // corsOrigin: this.options.corsOrigin || '*',
+      // corsHeaders: this.options.corsHeaders || 'accept,content-type,x-api-key',
+      // corsAllowCredentials: true,
+      // apiKey: this.options.apiKey || crypto.createHash('md5').digest('hex'),
+    }, this.options);
 
     // Prefix must start and end with '/'
     if (!this.params.prefix.startsWith('/')) this.params.prefix = `/${this.params.prefix}`;
     if (!this.params.prefix.endsWith('/')) this.params.prefix += '/';
 
     // Parse CORS options
+    // https://hapijs.com/api/14.2.0#route-options
     this.params.cors = {
-      origin: this.params.corsAllowOrigin.replace(/\s/g, '').split(','),
-      headers: this.params.corsAllowHeaders.replace(/\s/g, '').split(','),
-      credentials: !this.params.corsDisallowCredentials,
+      origin: this.params.corsOrigin.replace(/\s/g, '').split(','),
+      headers: this.params.corsHeaders.replace(/\s/g, '').split(','),
+      credentials: !this.params.noCorsCredentials,
     };
 
     // Locate service directory
     this.params.servicePath = path.join(this.serverless.config.servicePath, this.params.location);
+
+    // Save shared env vars
+    this.params.environment = this.serverless.service.provider.environment || {};
   }
 
   createServer() {
@@ -224,9 +226,20 @@ class ServerlessOffline {
     Object.keys(this.serverless.service.functions).forEach(id => {
 
       const functionDefinition = this.serverless.service.getFunction(id);
+      const [handlerFileName, handlerName] = functionDefinition.handler.split('.');
+
+      Object.assign(functionDefinition, {
+        id,
+        handlerName,
+        handlerPath: `${this.params.servicePath}/${handlerFileName}`,
+        timeout: (functionDefinition.timeout || 30) * 1000,
+        environment: Object.assign(this.params.environment, functionDefinition.environment),
+      });
+      console.log(functionDefinition);
 
       this.log();
       this.log(`Routes for ${id}:`);
+
 
       // Adds a route for each HTTP endpoint
       functionDefinition.events.forEach(eventDefinition => {
@@ -258,24 +271,36 @@ class ServerlessOffline {
           // TODO
         }
 
-        const cors = endpointDefinition.cors ?
-          Object.assign(this.params.cors, endpointDefinition.cors) :
-          null;
+        // CORS shenanigans
+        // https://hapijs.com/api/14.2.0#route-options
+        // https://serverless.com/framework/docs/providers/aws/events/apigateway/#enabling-cors
+        let cors = null;
+
+        if (endpointDefinition.cors === true) {
+          cors = this.params.cors;
+        }
+        else if (typeof endpointDefinition.cors === 'object') {
+          // Small difference between Serverless and Hapi APIS
+          if (endpointDefinition.cors.origins) {
+            endpointDefinition.cors.origin = endpointDefinition.cors.origins;
+            delete endpointDefinition.cors.origins;
+          }
+
+          cors = Object.assign(this.params.cors, endpointDefinition.cors);
+        }
 
         // Route creation
         this.server.route({
           method,
           path,
-          config: {
-            cors,
-          },
-          handler: this.createRouteHandler(integration),
+          config: { cors },
+          handler: this.createRouteHandler(functionDefinition, integration),
         });
       });
     });
   }
 
-  createRouteHandler(integration) {
+  createRouteHandler(functionDefinition, integration) {
 
     return (request, reply) => {
       // Shared mutable state is the root of all evil they say
@@ -299,31 +324,43 @@ class ServerlessOffline {
 
       /* HANDLER LAZY LOADING */
 
-      let handler; // The lambda function
+      // let handler; // The lambda function
+      //
+      // // Split handler into method name and path i.e. handler.run
+      // const handlerPath = fun.handler.split('.')[0];
+      // const handlerName = fun.handler.split('/').pop().split('.')[1];
 
-      try {
-        handler = functionHelper.createHandler(funOptions, this.options);
-      }
-      catch (err) {
-        return this._reply500(response, `Error while loading ${funName}`, err, requestId);
-      }
+      // return {
+      //   funName,
+      //   handlerName, // i.e. run
+      //   handlerPath: `${servicePath}/${handlerPath}`,
+      //   funTimeout: (fun.timeout || 6) * 1000,
+      //   babelOptions: ((fun.custom || {}).runtime || {}).babel,
+      // };
 
-      if (!this.params.skipCacheInvalidation) {
-        debugLog('Invalidating cache...');
-
-        for (const key in require.cache) {
-          // Require cache invalidation, brutal and fragile.
-          // Might cause errors, if so please submit an issue.
-          if (!key.match('node_modules')) delete require.cache[key];
-        }
-      }
-
-      debugLog(`Loading handler... (${funOptions.handlerPath})`);
-      const handler = require(funOptions.handlerPath)[funOptions.handlerName];
-
-      if (typeof handler !== 'function') {
-        throw new Error(`Serverless-offline: handler for '${funOptions.funName}' is not a function`);
-      }
+      // try {
+      //   handler = functionHelper.createHandler(funOptions, this.options);
+      // }
+      // catch (err) {
+      //   return this._reply500(response, `Error while loading ${funName}`, err, requestId);
+      // }
+      //
+      // if (!this.params.skipCacheInvalidation) {
+      //   debugLog('Invalidating cache...');
+      //
+      //   for (const key in require.cache) {
+      //     // Require cache invalidation, brutal and fragile.
+      //     // Might cause errors, if so please submit an issue.
+      //     if (!key.match('node_modules')) delete require.cache[key];
+      //   }
+      // }
+      //
+      // debugLog(`Loading handler... (${funOptions.handlerPath})`);
+      // const handler = require(funOptions.handlerPath)[funOptions.handlerName];
+      //
+      // if (typeof handler !== 'function') {
+      //   throw new Error(`Serverless-offline: handler for '${funOptions.funName}' is not a function`);
+      // }
     };
   }
 

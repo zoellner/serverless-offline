@@ -7,6 +7,8 @@ plugins:
 provider:
   name: aws
   runtime: nodejs4.3
+  environment:
+    hello: world
 
 functions:
   basicLambdaProxy:
@@ -39,19 +41,38 @@ functions:
           method: any
           integration: lambda
 
-  getOnlyLamdaProxy:
-    handler: handler.getOnlyLamdaProxy
+  getLamdaProxy:
+    handler: handler.getLamdaProxy
     events:
       - http:
-          path: getOnlyLamdaProxy
+          path: getLamdaProxy
           method: get
 
-  postOnlyLamdaProxy:
-    handler: handler.postOnlyLamdaProxy
+  postLamdaProxy:
+    handler: handler.postLamdaProxy
     events:
       - http:
-        path: postOnlyLamdaProxy
-        method: post
+          path: postLamdaProxy
+          method: post
+
+  getAndPostLamdaProxy:
+    handler: handler.getAndPostLamdaProxy
+    events:
+      - http:
+          path: getAndPostLamdaProxy
+          method: get
+      - http:
+          path: getAndPostLamdaProxy
+          method: post
+
+  environmentLambdaProxy:
+    handler: handler.environmentLambdaProxy
+    environment:
+      hello: "world-wide"
+    events:
+      - http:
+          path: environmentLambdaProxy
+          method: any
 
   catchAll:
     handler: handler.catchAll
