@@ -10,22 +10,24 @@ provider:
   environment:
     hello: world
 
+# Function names are prefixed with x_ because of
+# https://github.com/serverless/serverless/issues/2614
 functions:
-  basicLambdaProxy:
+  a_basicLambdaProxy:
     handler: handler.basicLambdaProxy
     events:
       - http:
           path: basicLambdaProxy
           method: any
 
-  basicLambdaProxy500:
+  b_basicLambdaProxy500:
     handler: handler.basicLambdaProxy500
     events:
       - http:
           path: basicLambdaProxy500
           method: any
 
-  basicLambda:
+  c_basicLambda:
     handler: handler.basicLambda
     events:
       - http:
@@ -33,39 +35,39 @@ functions:
           method: any
           integration: lambda
 
-  helloLambda500:
-    handler: handler.helloLambda500
+  d_basicLambda500:
+    handler: handler.basicLambda500
     events:
       - http:
-          path: helloLambda500
+          path: basicLambda500
           method: any
           integration: lambda
 
-  getLamdaProxy:
-    handler: handler.getLamdaProxy
+  e_getLambdaProxy:
+    handler: handler.getLambdaProxy
     events:
       - http:
-          path: getLamdaProxy
+          path: getLambdaProxy
           method: get
 
-  postLamdaProxy:
-    handler: handler.postLamdaProxy
+  f_postLambdaProxy:
+    handler: handler.postLambdaProxy
     events:
       - http:
-          path: postLamdaProxy
+          path: postLambdaProxy
           method: post
 
-  getAndPostLamdaProxy:
-    handler: handler.getAndPostLamdaProxy
+  g_getAndPostLambdaProxy:
+    handler: handler.getAndPostLambdaProxy
     events:
       - http:
-          path: getAndPostLamdaProxy
+          path: getAndPostLambdaProxy
           method: get
       - http:
-          path: getAndPostLamdaProxy
+          path: getAndPostLambdaProxy
           method: post
 
-  environmentLambdaProxy:
+  h_environmentLambdaProxy:
     handler: handler.environmentLambdaProxy
     environment:
       hello: "world-wide"
@@ -74,7 +76,28 @@ functions:
           path: environmentLambdaProxy
           method: any
 
-  catchAll:
+  i_requestTemplateLambda:
+    handler: handler.requestTemplateLambda
+    events:
+      - http:
+          path: requestTemplateLambda
+          method: any
+          integration: lambda
+          template:
+            text/xhtml: '{ "stage" : "$context.stage" }'
+            application/json: '{ "httpMethod" : "$context.httpMethod" }'
+
+  j_requestTemplateFileLambda:
+    handler: handler.requestTemplateFileLambda
+    events:
+      - http:
+          path: requestTemplateFileLambda
+          method: any
+          integration: lambda
+          template:
+            application/json: ${file('./requestTemplateFileLambda.vm')}
+
+  z_catchAll:
     handler: handler.catchAll
     events:
       - http:

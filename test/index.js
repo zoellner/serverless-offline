@@ -29,10 +29,11 @@ class ServerlessOfflineTester {
 
     this.offline.start().then(() => {
       invokeLocalFunction({
-        name: functions[0].id,
+        name: 'requestTemplateLambda',
         method: 'get',
       })
-      .then(() => {
+      .then(data => {
+        console.log(data);
         this.offline.end();
       });
     });

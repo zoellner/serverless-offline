@@ -26,14 +26,14 @@ module.exports.basicLambdaProxy500 = (event, context, callback) => {
 };
 
 module.exports.basicLambda = (event, context, cb) => {
-  cb(null, { message: 'Serverless-offline FTW! lambda-proxy integration', event });
+  cb(null, { message: 'Serverless-offline FTW! lambda integration', event });
 };
 
 module.exports.basicLambda500 = (event, context, cb) => {
-  cb(new Error('[500] Fake internal server error. lambda-proxy integration'));
+  cb(new Error('[500] Fake internal server error. lambda integration'));
 };
 
-module.exports.getLamdaProxy = (event, context, callback) => {
+module.exports.getLambdaProxy = (event, context, callback) => {
   const response = {
     statusCode: 200,
     body: JSON.stringify({
@@ -45,7 +45,7 @@ module.exports.getLamdaProxy = (event, context, callback) => {
   callback(null, response);
 };
 
-module.exports.postLamdaProxy = (event, context, callback) => {
+module.exports.postLambdaProxy = (event, context, callback) => {
   const response = {
     statusCode: 200,
     body: JSON.stringify({
@@ -57,7 +57,7 @@ module.exports.postLamdaProxy = (event, context, callback) => {
   callback(null, response);
 };
 
-module.exports.getAndPostLamdaProxy = (event, context, callback) => {
+module.exports.getAndPostLambdaProxy = (event, context, callback) => {
   const response = {
     statusCode: 200,
     body: JSON.stringify({
@@ -80,6 +80,14 @@ module.exports.environmentLambdaProxy = (event, context, callback) => {
   };
 
   callback(null, response);
+};
+
+module.exports.requestTemplateLambda = (event, context, cb) => {
+  cb(null, { message: 'Serverless-offline FTW! lambda integration with request template', event });
+};
+
+module.exports.requestTemplateFileLambda = (event, context, cb) => {
+  cb(null, { message: 'Serverless-offline FTW! lambda integration with request template file', event });
 };
 
 module.exports.catchAll = (event, context, callback) => {

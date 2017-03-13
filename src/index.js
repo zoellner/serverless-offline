@@ -5,6 +5,9 @@ const path = require('path');
 const Hapi = require('hapi');
 const hapiCorsHeaders = require('hapi-cors-headers');
 
+const { loadRequestTemplates, loadResponseTemplates } = require('./loadTemplates');
+const createVelocityContext = require('./createVelocityContext');
+
 class ServerlessOffline {
 
   constructor(serverless, options) {
@@ -192,6 +195,15 @@ class ServerlessOffline {
 
     // Save shared env vars
     this.params.environment = this.serverless.service.provider.environment || {};
+
+    console.log(this.serverless.service.provider);
+    console.log(this.serverless.service);
+
+    // Velocity options
+    this.params.velocity = {
+      stage: this.serverless.service.provider.stage,
+      stageVariables: {}, // TODO
+    };
   }
 
   createServer() {
@@ -239,7 +251,6 @@ class ServerlessOffline {
       this.log();
       this.log(`Routes for ${id}:`);
 
-
       // Adds a route for each HTTP endpoint
       functionDefinition.events.forEach(eventDefinition => {
 
@@ -247,7 +258,7 @@ class ServerlessOffline {
 
         if (!endpointDefinition) return;
 
-        let path, method, integration;
+        let path, method, integration, requestTemplates, responseTemplates;
 
         // Handle one-liner setups like - http: GET users/index
         if (typeof endpointDefinition === 'string') [method, path] = endpointDefinition.split(' ');
@@ -268,6 +279,11 @@ class ServerlessOffline {
 
         if (endpointDefinition.authorizer) {
           // TODO
+        }
+
+        if (integration === 'lambda') {
+          requestTemplates = loadRequestTemplates(functionDefinition, endpointDefinition);
+          responseTemplates = loadResponseTemplates(functionDefinition, endpointDefinition);
         }
 
         // CORS shenanigans
@@ -293,15 +309,16 @@ class ServerlessOffline {
           method,
           path,
           config: { cors },
-          handler: this.createRouteHandler(functionDefinition, integration),
+          handler: this.createRouteHandler(functionDefinition, integration, requestTemplates, responseTemplates),
         });
       });
     });
   }
 
-  createRouteHandler(functionDefinition, integration) {
+  createRouteHandler(functionDefinition, integration, requestTemplates, responseTemplates) {
 
     return (request, reply) => {
+      console.log('new request', functionDefinition.id);
       // Shared mutable state is the root of all evil they say
       const requestId = Math.random().toString().slice(2);
       this.requests[requestId] = { done: false };
@@ -321,7 +338,9 @@ class ServerlessOffline {
         }
       }
 
-      /* HANDLER LAZY LOADING */
+      /* ---------------------
+        Handler lazy loading
+      --------------------- */
 
       let handler;
 
@@ -344,6 +363,37 @@ class ServerlessOffline {
         this.log(`Error while loading ${functionDefinition.id}`);
 
         return this.reply500(response, new Error(`Serverless-offline: handler for '${functionDefinition.id}' is not a function`), requestId);
+      }
+
+      /* -----------------
+        Event population
+      ----------------- */
+
+      let event = {};
+
+      if (integration === 'lambda') {
+        try {
+          // Velocity templating language parsing
+          const requestTemplate = requestTemplates[contentType] || '';
+          const velocityContext = createVelocityContext(request, this.params.velocity);
+
+          event = renderVelocityTemplateObject(requestTemplate, velocityContext);
+        }
+        catch (err) {
+          return this._reply500(response, `Error while parsing template "${contentType}" for ${funName}`, err, requestId);
+        }
+      }
+      else if (integration === 'lambda-proxy') {
+        event = createLambdaProxyContext(request, this.options, this.velocityContextOptions.stageVariables);
+      }
+
+      event.isOffline = true;
+
+      if (this.serverless.service.custom && this.serverless.service.custom.stageVariables) {
+        event.stageVariables = this.serverless.service.custom.stageVariables;
+      }
+      else if (integration !== 'lambda-proxy') {
+        event.stageVariables = {};
       }
 
       response.send();
