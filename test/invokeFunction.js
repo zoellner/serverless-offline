@@ -2,11 +2,12 @@ const request = require('request');
 
 // Please act responsibly. Thanks.
 const remoteUrl = 'https://cb2yhbkxid.execute-api.us-east-1.amazonaws.com/dev/';
+const localUrl = 'http://localhost:3000/';
 
-function invokeRemoteFunction({ name, method, headers, body }) {
-  return new Promise((resolve, reject) => {
+function invokeFunction(url) {
+  return ({ name, method, headers, body }) => new Promise((resolve, reject) => {
     const options = {
-      url: remoteUrl + name,
+      url: url + name,
       method,
       headers,
       body,
@@ -16,4 +17,7 @@ function invokeRemoteFunction({ name, method, headers, body }) {
   });
 }
 
-module.exports = invokeRemoteFunction;
+module.exports = {
+  invokeRemoteFunction: invokeFunction(remoteUrl),
+  invokeLocalFunction: invokeFunction(localUrl),
+};

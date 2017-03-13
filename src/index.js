@@ -29,10 +29,9 @@ class ServerlessOffline {
             usage: 'Adds a prefix to every path, to send your requests to http://localhost:3000/prefix/[your_path] instead.',
             shortcut: 'p',
           },
-          // skipCacheInvalidation: {
-          //   usage: 'Tells the plugin to skip require cache invalidation. A script reloading tool like Nodemon might then be needed',
-          //   shortcut: 'c',
-          // },
+          skipCacheInvalidation: {
+            usage: 'Tells the plugin to skip require cache invalidation. A script reloading tool like Nodemon might then be needed',
+          },
           location: {
             usage: 'The root location of the handlers\' files.',
             shortcut: 'l',
@@ -235,7 +234,7 @@ class ServerlessOffline {
         timeout: (functionDefinition.timeout || 30) * 1000,
         environment: Object.assign(this.params.environment, functionDefinition.environment),
       });
-      console.log(functionDefinition);
+      // console.log(functionDefinition);
 
       this.log();
       this.log(`Routes for ${id}:`);
@@ -324,43 +323,30 @@ class ServerlessOffline {
 
       /* HANDLER LAZY LOADING */
 
-      // let handler; // The lambda function
-      //
-      // // Split handler into method name and path i.e. handler.run
-      // const handlerPath = fun.handler.split('.')[0];
-      // const handlerName = fun.handler.split('/').pop().split('.')[1];
+      let handler;
 
-      // return {
-      //   funName,
-      //   handlerName, // i.e. run
-      //   handlerPath: `${servicePath}/${handlerPath}`,
-      //   funTimeout: (fun.timeout || 6) * 1000,
-      //   babelOptions: ((fun.custom || {}).runtime || {}).babel,
-      // };
+      if (!this.params.skipCacheInvalidation) {
+        for (const key in require.cache) {
+          if (!key.includes('node_modules')) delete require.cache[key];
+        }
+      }
 
-      // try {
-      //   handler = functionHelper.createHandler(funOptions, this.options);
-      // }
-      // catch (err) {
-      //   return this._reply500(response, `Error while loading ${funName}`, err, requestId);
-      // }
-      //
-      // if (!this.params.skipCacheInvalidation) {
-      //   debugLog('Invalidating cache...');
-      //
-      //   for (const key in require.cache) {
-      //     // Require cache invalidation, brutal and fragile.
-      //     // Might cause errors, if so please submit an issue.
-      //     if (!key.match('node_modules')) delete require.cache[key];
-      //   }
-      // }
-      //
-      // debugLog(`Loading handler... (${funOptions.handlerPath})`);
-      // const handler = require(funOptions.handlerPath)[funOptions.handlerName];
-      //
-      // if (typeof handler !== 'function') {
-      //   throw new Error(`Serverless-offline: handler for '${funOptions.funName}' is not a function`);
-      // }
+      try {
+        handler = require(functionDefinition.handlerPath)[functionDefinition.handlerName];
+      }
+      catch (err) {
+        this.log(`Error while loading ${functionDefinition.id}`);
+
+        return this.reply500(response, err, requestId);
+      }
+
+      if (typeof handler !== 'function') {
+        this.log(`Error while loading ${functionDefinition.id}`);
+
+        return this.reply500(response, new Error(`Serverless-offline: handler for '${functionDefinition.id}' is not a function`), requestId);
+      }
+
+      response.send();
     };
   }
 
@@ -371,7 +357,7 @@ class ServerlessOffline {
     this.server.route({
       method: '*',
       path: '/{p*}',
-      config: { cors: this.para.corsConfig },
+      config: { cors: this.params.corsConfig },
       handler: (request, reply) => {
         const response = reply({
           statusCode: 404,
@@ -385,6 +371,38 @@ class ServerlessOffline {
         response.statusCode = 404;
       },
     });
+  }
+
+  clearRequest(requestId) {
+    const timeout = this.requests[requestId].timeout;
+
+    if (timeout && timeout._called) return true;
+
+    clearTimeout(timeout);
+
+    this.requests[requestId].done = true;
+  }
+
+  // Bad news
+  reply500(response, err, requestId) {
+    if (this.clearRequest(requestId)) return;
+
+    console.log(err.stackTrace || err);
+
+    /* eslint-disable no-param-reassign */
+    // APIG replies 200 by default on failures
+    response.statusCode = 200;
+    response.source = {
+      errorMessage: err.message,
+      errorType: err.constructor.name,
+      stackTrace: err.stack,
+      offlineInfo: 'If you believe this is an issue with the plugin please submit it, thanks. https://github.com/dherault/serverless-offline/issues',
+    };
+    /* eslint-enable no-param-reassign */
+
+    this.log('Replying error in handler');
+
+    response.send();
   }
 
   // Some user would like to execute some script
