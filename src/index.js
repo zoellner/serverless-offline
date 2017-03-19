@@ -7,6 +7,8 @@ const hapiCorsHeaders = require('hapi-cors-headers');
 
 const { loadRequestTemplates, loadResponseTemplates } = require('./loadTemplates');
 const createVelocityContext = require('./createVelocityContext');
+const renderVelocityTemplateObject = require('./renderVelocityTemplateObject');
+
 
 class ServerlessOffline {
 
@@ -202,7 +204,7 @@ class ServerlessOffline {
     // Velocity options
     this.params.velocity = {
       stage: this.serverless.service.provider.stage,
-      stageVariables: {}, // TODO
+      stageVariables: this.serverless.service.custom && this.serverless.service.custom.stageVariables || {},
     };
   }
 
@@ -375,12 +377,14 @@ class ServerlessOffline {
         try {
           // Velocity templating language parsing
           const requestTemplate = requestTemplates[contentType] || '';
-          const velocityContext = createVelocityContext(request, this.params.velocity);
+          const velocityContext = createVelocityContext(request, this.params.velocity, request.payload);
 
           event = renderVelocityTemplateObject(requestTemplate, velocityContext);
         }
         catch (err) {
-          return this._reply500(response, `Error while parsing template "${contentType}" for ${funName}`, err, requestId);
+          this.log(`Error while parsing template "${contentType}" for ${functionDefinition.id}`);
+
+          return this.reply500(response, err, requestId);
         }
       }
       else if (integration === 'lambda-proxy') {

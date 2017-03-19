@@ -22,14 +22,18 @@ function escapeJavaScript(x) {
   Returns a context object that mocks APIG mapping template reference
   http://docs.aws.amazon.com/apigateway/latest/developerguide/api-gateway-mapping-template-reference.html
 */
-function createVelocityContext(request, options, payload) {
+function createVelocityContext(request, options, payload = {}) {
 
   const path = x => jsonPath(payload || {}, x);
   const authPrincipalId = request.auth && request.auth.credentials && request.auth.credentials.user;
 
   // Capitalize request.headers as NodeJS use lowercase headers
   // however API Gateway always pass capitalize headers
-  const headers = utils.capitalizeKeys(request.headers);
+  const headers = {};
+
+  for (const key in request.headers) {
+    headers[key.replace(/((?:^|-)[a-z])/g, x => x.toUpperCase())] = request.headers[key];
+  }
 
   return {
     context: {
